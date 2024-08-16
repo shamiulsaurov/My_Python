@@ -1,18 +1,26 @@
+import os
 import subprocess
 import getpass
 
-def list_users():
+def list_home_users():
     try:
-        # List all users (excluding system users)
-        users = subprocess.check_output(['cut', '-d:', '-f1', '/etc/passwd']).decode().split('\n')
-        # Filter out system users and print normal users
-        normal_users = [user for user in users if not user.startswith('_') and user not in ('root', 'nobody', 'daemon')]
-        print("Existing users:")
-        for user in normal_users:
+        # List all users with home directories under /home
+        home_users = []
+        for user_dir in os.listdir('/home'):
+            user_path = os.path.join('/home', user_dir)
+            if os.path.isdir(user_path):
+                # Check if the directory is owned by a user
+                user_info = subprocess.check_output(['ls', '-ld', user_path]).decode().split()
+                owner = user_info[2]
+                if owner not in home_users:
+                    home_users.append(owner)
+        
+        print("Existing users with home directories:")
+        for user in home_users:
             print(user)
-        return normal_users
-    except subprocess.CalledProcessError as e:
-        print(f"Error listing users: {e}")
+        return home_users
+    except Exception as e:
+        print(f"Error listing home users: {e}")
         return []
 
 def delete_user(username):
@@ -29,8 +37,8 @@ def delete_user(username):
         print(f"Error deleting user {username}: {e}")
 
 def main():
-    # List existing users
-    existing_users = list_users()
+    # List existing home users
+    existing_users = list_home_users()
     
     if existing_users:
         # Get usernames to delete from user input
@@ -41,9 +49,9 @@ def main():
             if username in existing_users:
                 delete_user(username)
             else:
-                print(f"User {username} does not exist.")
+                print(f"User {username} does not exist or does not have a home directory.")
     else:
-        print("No users available for deletion.")
+        print("No users with home directories available for deletion.")
 
 if __name__ == "__main__":
     if getpass.getuser() != 'root':
