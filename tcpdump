@@ -1,0 +1,147 @@
+"""
+Developed By: Md. Shamiul Huda Saurov
+Version: 0.1
+"""
+
+import paramiko
+import time
+import os
+import getpass  # For masking password input
+
+def print_header():
+    print("""
+    *************************************************
+    *                                               *
+    *        Developed By: Md. Shamiul Huda Saurov   *
+    *        Version: 0.1                            *
+    *                                               *
+    *************************************************
+                    .o oOOOOOOOo                                           
+                    Ob.OOOOOOOo  OOOo.      oOOO                           
+                     OboOOOoO'.OOo.     .adOOOOOOO
+                     OOP.oOOOO' .oOOOo.OOOOOOOOOP
+                     O'OOO' .adOOOOOOOOO' 
+                      'o' .oOOOOOOOOOOO'.                               
+                        OOOOOOOOOOOO:                                       
+                        OOOOOOOOOOO'   
+                        OOOOOOOOOOO                                   
+                        OOOOOOOOOOO
+                        OOOOOOOOOOO
+                        OOOOOOOOOOOOoo..  Developed By: Md. Shamiul Huda Saurov
+                        'OOOOOOOOOOOOOOOOoo
+                          ''OOOOOOOOOOOOOOOOo
+                            ''oOOOOOOOOOOOOOOo
+                                ''oOOOOOOOOOOOOOo                                      
+                                    ''oOOOOOOOOOOOo  
+                                        ''oOOOOOOOOo
+                                            ''oOOOOOo
+                                                ''oOO
+    """)
+
+# Function to establish SSH connection
+def ssh_connect(hostname, port, username, password):
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(hostname, port, username, password)
+        print("SSH Connection Successful")
+        return client
+    except paramiko.AuthenticationException as e:
+        print(f"Authentication failed: {e}")
+        return None
+    except paramiko.SSHException as e:
+        print(f"SSH connection failed: {e}")
+        return None
+    except Exception as e:
+        print(f"Connection failed: {e}")
+        return None
+
+# Function to retrieve all active TCP ports
+def get_tcp_ports(ssh_client):
+    stdin, stdout, stderr = ssh_client.exec_command("netstat -tnlp | grep 'LISTEN' | awk '{print $4}' | awk -F: '{print $NF}' | sort -n | uniq")
+    ports = stdout.read().decode().splitlines()
+    if ports:
+        print("Available TCP ports:", ports)
+        return ports
+    else:
+        print("Failed to retrieve TCP ports.")
+        return []
+
+# Function to execute tcpdump on the remote server
+def execute_tcpdump(ssh_client, port, duration, remote_pcap_file, sudo_password):
+    try:
+        # Command with sudo
+        cmd = f"echo {sudo_password} | sudo -S tcpdump -i any port {port} -w {remote_pcap_file} -G {duration} -W 1"
+        stdin, stdout, stderr = ssh_client.exec_command(cmd)
+        time.sleep(duration + 5)  # Wait for the tcpdump to complete
+        print(f"TCP dump on port {port} completed, file saved as {remote_pcap_file}")
+    except Exception as e:
+        print(f"Failed to execute tcpdump: {e}")
+
+# Function to check if file exists on the remote server
+def check_remote_file_exists(ssh_client, remote_pcap_file):
+    try:
+        stdin, stdout, stderr = ssh_client.exec_command(f"test -f {remote_pcap_file} && echo 'File exists' || echo 'File does not exist'")
+        response = stdout.read().decode().strip()
+        if response == "File exists":
+            return True
+        else:
+            print("File does not exist on the remote server.")
+            return False
+    except Exception as e:
+        print(f"Error checking file existence: {e}")
+        return False
+
+# Function to transfer the .pcap file to the local machine
+def transfer_file(ssh_client, remote_pcap_file, local_pcap_file):
+    try:
+        sftp = ssh_client.open_sftp()
+        sftp.get(remote_pcap_file, local_pcap_file)
+        sftp.close()
+        print(f"File transferred successfully to {local_pcap_file}")
+    except Exception as e:
+        print(f"Failed to transfer file: {e}")
+
+def main():
+    # Print the fancy header
+    print_header()
+    
+    # SSH connection details
+    hostname = input("Enter the remote server IP: ")
+    port = int(input("Enter the SSH port number (default 22): ") or 22)
+    username = input("Enter the SSH username: ")
+    password = getpass.getpass("Enter the SSH password: ")  # Password masking
+    sudo_password = getpass.getpass("Enter the sudo password (if required): ")  # Sudo password masking
+
+    # Establish SSH connection
+    ssh_client = ssh_connect(hostname, port, username, password)
+    if ssh_client is None:
+        return
+    
+    # Retrieve available TCP ports
+    ports = get_tcp_ports(ssh_client)
+    if not ports:
+        ssh_client.close()
+        return
+
+    # Prompt operator for port and duration
+    tcp_port = input(f"Enter the port to monitor from available ports {ports}: ")
+    duration = int(input("Enter the duration for tcpdump (in seconds): "))
+
+    # Define remote and local file paths
+    remote_pcap_file = f"/tmp/tcpdump_{tcp_port}.pcap"
+    local_pcap_file = os.path.join(os.getcwd(), f"tcpdump_{tcp_port}.pcap")
+
+    # Execute tcpdump with sudo
+    execute_tcpdump(ssh_client, tcp_port, duration, remote_pcap_file, sudo_password)
+
+    # Check if the file exists before attempting transfer
+    if check_remote_file_exists(ssh_client, remote_pcap_file):
+        # Transfer file to local machine
+        transfer_file(ssh_client, remote_pcap_file, local_pcap_file)
+
+    # Close the SSH connection
+    ssh_client.close()
+
+if __name__ == "__main__":
+    main()
